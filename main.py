@@ -2,40 +2,30 @@ import argparse
 import asyncio
 import json
 import traceback
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from random import choice, uniform
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import httpx
 
-from config import DoctorParams, PolicyParams
+from config import DoctorParams, GlobalsParams, PolicyParams, get_cookies
 
 headers = {
     'x-requested-with': 'XMLHttpRequest',
 }
 
-def get_cookies() -> dict[str, str]:
-    p = Path(".data/user.json")
-    cookies = json.loads(p.read_text())['cookies']
-
-    result = {}
-    for cookie in cookies:
-        name = cookie['name']
-        value = cookie['value']
-        result[name] = value
-
-    return result
     
 async def send_request(
         client: httpx.AsyncClient,
         method: Literal["GET", "POST"],
         url: str,
-        params: dict[str, str] | None = None,
-        data: dict[str, dict[str, Any]] | None = None,
+        params: PolicyParams | DoctorParams | GlobalsParams| None = None,
+        data: Mapping[str, dict[str, Any] | str] | None = None,
         json: Any | None = None,
-    ) -> httpx.Response | None:
+    ) -> httpx.Response:
     
     attempts = 3
 
@@ -44,7 +34,7 @@ async def send_request(
             response = await client.request(
                 method=method,
                 url=url,
-                params=params,
+                params=cast(Any, params),
                 data=data,
                 json=json,
             )
@@ -56,17 +46,22 @@ async def send_request(
         print('Ожидание 3 секунды')
         await asyncio.sleep(3)
 
-    except httpx.TimeoutException as e:
+    except httpx.TimeoutException:
         print(f'{url}: Превышено время ожидания')
 
     except httpx.HTTPError as e:
         print(f'{url}: Сетевая ошибка: {e}')
+
+    raise RuntimeError(f'Не удалось выполнить запрос: {url}')
         
 def create_data_init() -> dict[str, dict[str, Any]]:
     return {'select_doctor': {
         'user': None,
         'doctor': None
     }}
+
+def create_globals_params() -> GlobalsParams:
+    return {'globalsid': ''}
 
 @dataclass
 class GosuslugiRT:
@@ -76,7 +71,7 @@ class GosuslugiRT:
     policy_params: PolicyParams
     doctor_params: DoctorParams
     doctors: list[str]
-    globals_params: dict[str, str] = field(default_factory=dict)
+    globals_params: GlobalsParams = field(default_factory=create_globals_params)
     data_init: dict[str, dict[str, Any]] = field(default_factory=create_data_init)
 
     async def get_globals_id(self):
@@ -124,7 +119,9 @@ class GosuslugiRT:
             for selected_doctor in self.doctors:
                 for doctor in doctors:
                     if doctor['name'] == selected_doctor and doctor['available_dates']:
-                        data_init_selected_doctor = deepcopy(self.data_init)
+                        data_init_selected_doctor: dict[str, Any] = deepcopy(
+                            self.data_init
+                        )
                         data_init_selected_doctor['select_doctor']['doctor'] = doctor
                         data_init_selected_doctor['select_doctor'] = json.dumps(
                             data_init_selected_doctor['select_doctor']
@@ -138,7 +135,7 @@ class GosuslugiRT:
                 break    
 
 
-    async def init_data(self, data_init: dict[str, dict[str, str]], doctor: str):
+    async def init_data(self, data_init: dict[str, Any], doctor: str):
 
         response = await send_request(
             self.client,
@@ -170,22 +167,22 @@ class GosuslugiRT:
         year = appointment_time['date']['year']
         select_time, select_id = appointment_time['time'], appointment_time['id']
         self.date_time = f'{day}.{month}.{year} {select_time}'
-        data_select = {
+        select_data = {
             'selectedDate': self.date_time,
             'selectedId': select_id
         }
 
-        await self.confirm_record(data_select, doctor)
+        await self.confirm_record(select_data, doctor)
 
 
-    async def confirm_record(self, data_select: dict[str, str], doctor: str):
+    async def confirm_record(self, select_data: dict[str, str], doctor: str):
 
         response = await send_request(
             self.client,
             'POST',
             '/init-record',
             self.globals_params,
-            data_select
+            select_data
         )
         print(self.whois + ':', response.url)
         

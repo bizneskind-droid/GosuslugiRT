@@ -4,12 +4,9 @@ import traceback
 from copy import deepcopy
 from functools import cache
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import TypedDict, cast
 
 import httpx
-
-from autostart_windows import windows_task
-from main import get_cookies
 
 all_directions = {
     '1': ['Терапевт, Педиатр', 'terapevt'], 
@@ -17,6 +14,11 @@ all_directions = {
     '3': ['Гинекология', 'ginekolog'],
     '4': ['Другие специальности', 'other_doctor']
 }
+
+client: httpx.Client
+
+class GlobalsParams(TypedDict):
+    globalsid: str
 
 class PolicyParams(TypedDict):
     globalsid: str
@@ -55,10 +57,24 @@ class State(TypedDict):
     doctors: list[Doctor]
     selected_doctors: list[str]
     time: str | None
+    
+def get_cookies() -> dict[str, str]:
+    p = Path(".data/user.json")
+    cookies = json.loads(p.read_text())['cookies']
+
+    result = {}
+    for cookie in cookies:
+        name = cookie['name']
+        value = cookie['value']
+        result[name] = value
+
+    return result
 
 
 def init_session(directions: dict[str, list]) -> State:
-    
+    if client is None:
+        raise RuntimeError('HTTP-клиент не инициализирован')
+
     response = client.get('/init')
     globals_id = response.url.params["globalsid"]
     
@@ -102,11 +118,11 @@ def choose_policy(state: State):
 
 @cache
 def set_policy(policy_params: tuple):
-    policy_params = dict(policy_params)
+    params = dict(policy_params)
     
     client.get(
     '/check-policy-ajax',
-    params=policy_params
+    params=params
     )
     
     
@@ -128,15 +144,15 @@ def choose_direction(state: State):
     
 
 @cache
-def get_doctors(doctor_params: tuple, policy_key: int) -> list[dict[str, Any]]:
-    doctor_params = dict(doctor_params)
+def get_doctors(doctor_params: tuple, policy_key: int) -> list[Doctor]:
+    doctor_params_dict = dict(doctor_params)
         
     response = client.get(
     '/ajax-source',
-    params=doctor_params
+    params=doctor_params_dict
     )
     
-    return response.json()['resources']
+    return cast(list[Doctor], response.json()['resources'])
 
 
 def choose_doctors(state: State):
@@ -172,6 +188,7 @@ def set_task(selected_time):
     platform = sys.platform
     
     if platform == "win32":
+        from autostart_windows import windows_task
         windows_task(selected_time)
     elif platform == "linux":
         pass
@@ -202,7 +219,7 @@ def add_appointment(appointments: dict,
 
 
 def finish_record(appointments: dict,
-                  state: dict[str, dict],
+                  state: State,
                   current: int
     ) -> tuple[dict[str, dict], int]:
     
@@ -301,5 +318,4 @@ def set_config():
 
 
 if __name__ == '__main__':
-    client = None
     set_config()
