@@ -239,7 +239,7 @@ async def main(selected_time):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--time", default=None)
+    parser.add_argument("--time", default="null")
         
     args = parser.parse_args()
     

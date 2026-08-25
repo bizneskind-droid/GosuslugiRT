@@ -5,7 +5,7 @@ from copy import deepcopy
 from functools import cache
 from pathlib import Path
 from typing import TypedDict, cast
-
+from setup import setup
 import httpx
 
 all_directions = {
@@ -60,6 +60,10 @@ class State(TypedDict):
     
 def get_cookies() -> dict[str, str]:
     p = Path(".data/user.json")
+    
+    if not p.exists():
+        setup()
+        
     cookies = json.loads(p.read_text())['cookies']
 
     result = {}
@@ -313,8 +317,7 @@ def set_config():
         traceback.print_exc()
         
     finally:
-        if client is not None:
-            client.close()
+        client.close()
 
 
 if __name__ == '__main__':
