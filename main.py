@@ -12,6 +12,7 @@ from typing import Any, Literal, cast
 import httpx
 
 from config import DoctorParams, GlobalsParams, PolicyParams, get_cookies
+from logger import logger
 
 headers = {
     'x-requested-with': 'XMLHttpRequest',
@@ -42,15 +43,25 @@ async def send_request(
             return response
         
     except httpx.HTTPStatusError as e:
-        print(f'{url}: {e}')
-        print('Ожидание 3 секунды')
+        logger.warning(
+            "HTTP ошибка %s при запросе %s\n"
+            "Ожидание 3 секунды",
+            e.response.status_code,
+            url,    
+        )
         await asyncio.sleep(3)
 
     except httpx.TimeoutException:
-        print(f'{url}: Превышено время ожидания')
+        logger.warning(
+            "Превышено время ожидания при запросе %s",
+            url,
+        )
 
-    except httpx.HTTPError as e:
-        print(f'{url}: Сетевая ошибка: {e}')
+    except httpx.HTTPError:
+        logger.warning(
+            "Сетевая ошибка при запросе %s",
+            url,
+        )
 
     raise RuntimeError(f'Не удалось выполнить запрос: {url}')
         
@@ -80,7 +91,10 @@ class GosuslugiRT:
             'GET',
             '/init',
         )
-        print(self.whois + ':', response.url)
+        
+        logger.info('[%s] Инициализация готова',
+                    self.whois,
+        )
         globals_id = response.url.params["globalsid"]
 
         self.globals_params['globalsid'] = globals_id
@@ -88,16 +102,18 @@ class GosuslugiRT:
         self.policy_params['globalsid'] = globals_id
 
 
-    async def get_user(self):
+    async def confirmation_police(self):
         response = await send_request(
             self.client,
             'GET',
             '/check-policy-ajax',
             self.policy_params
         )
-
-        print(self.whois + ':', response.url)
         
+        logger.info('[%s] Полис проверен',
+                    self.whois,
+                    )
+
         self.data_init['select_doctor']['user'] = response.json()['user']
 
 
@@ -105,7 +121,7 @@ class GosuslugiRT:
         
         attempts = 5
         
-        for _ in range(attempts):
+        for attempt in range(1, attempts + 1):
             response = await send_request(
                 self.client,
                 'GET',
@@ -113,7 +129,6 @@ class GosuslugiRT:
                 self.doctor_params
             )
 
-            print(self.whois + ':', response.url)
             doctors = response.json()['resources']
 
             for selected_doctor in self.doctors:
@@ -128,16 +143,24 @@ class GosuslugiRT:
                         )
 
                         await self.init_data(data_init_selected_doctor, selected_doctor)
-
-            await asyncio.sleep(uniform(1, 1.5))
+                        break
+                else:      
+                    logger.info('[%s] попытка %s/%s: Не найдено доступных дат для %s',
+                                self.whois,
+                                attempt,
+                                attempts,
+                                selected_doctor
+                    )
+                                   
 
             if not self.doctors:
                 break    
 
+            await asyncio.sleep(uniform(1, 1.5))
 
     async def init_data(self, data_init: dict[str, Any], doctor: str):
 
-        response = await send_request(
+        await send_request(
             self.client,
             "POST",
             '/init-data-form-source',
@@ -145,7 +168,10 @@ class GosuslugiRT:
             data_init
         )
 
-        print(self.whois + ':', response.url)
+        logger.info('[%s] Получены свободные даты для %s',
+                    self.whois,
+                    doctor
+        )
 
         await self.choose_ticket(doctor)
 
@@ -157,7 +183,10 @@ class GosuslugiRT:
             self.globals_params
         )
 
-        print(self.whois + ':', response.url)
+        logger.info('[%s] Выбираем случайный слот для %s',
+                    self.whois,
+                    doctor
+        )
 
         ticket = choice(response.json()['tickets'])
         appointment_time = choice(ticket)
@@ -184,22 +213,28 @@ class GosuslugiRT:
             self.globals_params,
             select_data
         )
-        print(self.whois + ':', response.url)
-        
+
         if response.json()['status'] == 'success':
             self.doctors.remove(doctor)
-            print(f'{self.whois} - {doctor} - запись на {self.date_time}')
+            logger.info('[%s] Запись успешно подтверждена для %s\n'
+                        'Дата и время: %s',
+                        self.whois,
+                        doctor,
+                        self.date_time
+            )
 
 
     async def runner(self):
         try:
             await self.get_globals_id()
-            await self.get_user()
+            await self.confirmation_police()
             await self.check_dates()
 
         except Exception:
-            print(f'{self.whois}: {traceback.print_exc()}')
-
+            logger.error('[%s] Произошла ошибка',
+                         self.whois
+            )
+            
 async def book_appointment(client: httpx.AsyncClient, appointments: dict[str, dict]):
 
     coroutines  = list()
@@ -227,7 +262,7 @@ async def main(selected_time):
     ) as client:
         
         p = Path('.data/appointments.json')
-        all_appointments = json.loads(p.read_text())
+        all_appointments = json.loads(p.read_text(encoding='utf-8'))
         
         appointments = {}
         for appointment_time in all_appointments:
@@ -240,9 +275,10 @@ async def main(selected_time):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--time", default="null")
-        
-    args = parser.parse_args()
     
+    logger.info('Запущена новая сессия')
+    
+    args = parser.parse_args()
     asyncio.run(main(args.time))
 
 

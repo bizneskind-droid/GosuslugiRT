@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import json
 import sys
 import traceback
@@ -5,8 +7,10 @@ from copy import deepcopy
 from functools import cache
 from pathlib import Path
 from typing import TypedDict, cast
-from setup import setup
+
 import httpx
+
+from setup import setup
 
 all_directions = {
     '1': ['Терапевт, Педиатр', 'terapevt'], 
@@ -38,14 +42,7 @@ class AvailableDates(TypedDict):
 
 
 class Doctor(TypedDict):
-    id: str
     name: str
-    comment: str
-    snils: None
-    room_id: str
-    group: None
-    clinic: dict[str, str]
-    service: dict[str, str]
     available_dates: list[AvailableDates]
 
 
@@ -59,12 +56,12 @@ class State(TypedDict):
     time: str | None
     
 def get_cookies() -> dict[str, str]:
-    p = Path(".data/user.json")
+    p = Path(".data/")
     
-    if not p.exists():
+    if not (p/'policy.json').exists():
         setup()
         
-    cookies = json.loads(p.read_text())['cookies']
+    cookies = json.loads((p/'user.json').read_text(encoding='utf-8'))['cookies']
 
     result = {}
     for cookie in cookies:
@@ -104,7 +101,7 @@ def init_session(directions: dict[str, list]) -> State:
     
 def choose_policy(state: State):
     p = Path('.data/policy.json')
-    policy = json.loads(p.read_text())
+    policy = json.loads(p.read_text(encoding='utf-8'))
 
     for key in policy:
         num = int(key) + 1
@@ -160,14 +157,16 @@ def get_doctors(doctor_params: tuple, policy_key: int) -> list[Doctor]:
 
 
 def choose_doctors(state: State):
-    doctors = [doctor['name'] for doctor in state['doctors'] \
-               if not doctor['available_dates']]
+    doctors = state['doctors']
+    # [doctor['name'] for doctor in state['doctors'] \
+    #            if not doctor['available_dates']]
     
     if not doctors:
         raise ValueError("Нет врачей")
         
     doctors_dict = {}
     for i, doctor in enumerate(doctors, start=1):
+        doctor = doctor['name']
         doctors_dict[str(i)] = doctor
         print(f'{i} - {doctor}')
         print('-' * 100)

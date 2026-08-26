@@ -35,6 +35,7 @@ creation_tasks = {
 
 
 def set_triggers(hour, minute, definition):
+
     target_time = time(hour, minute)
     now = datetime.now().time()
     today = date.today()
@@ -43,12 +44,14 @@ def set_triggers(hour, minute, definition):
         scheduled_time = datetime.combine(tomorrow, target_time)
     else:
         scheduled_time = datetime.combine(today, target_time)
+   
 
     run_at = scheduled_time.strftime("%Y-%m-%dT%H:%M:%S")
+    end_at = (scheduled_time + timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S")
 
     trigger = definition.Triggers.Create(triggers['task_trigger_time'])
     trigger.StartBoundary = run_at
-    trigger.EndBoundary = run_at
+    trigger.EndBoundary = end_at
 
 
 def set_actions(selected_time, definition):
@@ -65,7 +68,7 @@ def set_actions(selected_time, definition):
     definition.Settings.WakeToRun = True
 
     # Удалить задачу после expiration
-    expiration = 'PT5M'
+    expiration = 'PT10M'
     definition.Settings.DeleteExpiredTaskAfter = expiration
 
 
@@ -95,4 +98,4 @@ def windows_task(selected_time):
     set_actions(selected_time, definition)
     register_task(root, hour, minute, definition)
     
-    
+

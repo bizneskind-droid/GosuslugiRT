@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import json
 from pathlib import Path
 
@@ -25,7 +27,7 @@ def get_policies(page, p):
     
 
 def setup():
-    pth = Path("/.data")
+    pth = Path(".data")
     pth.mkdir(parents=True, exist_ok=True)
 
     phone_number = input('Введите номер телефона: +7').strip()
@@ -34,7 +36,8 @@ def setup():
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            args=['--disable-blink-features=AutomationControlled']
+            args=['--disable-blink-features=AutomationControlled'],
+            channel="chrome"
         )
         context = browser.new_context()
         page = context.new_page()
@@ -53,7 +56,11 @@ def setup():
         page.get_by_role("button", name="Войти").click()
         page.wait_for_load_state("domcontentloaded")
         
-        page.context.storage_state(path=pth / 'user.json')
+        user_state = page.context.storage_state()
+        (pth / 'user.json').write_text(
+            json.dumps(user_state, ensure_ascii=False, indent=4),
+            encoding='utf-8'
+        )
         
         get_policies(page, pth)
         
