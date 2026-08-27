@@ -23,3 +23,4 @@ logging.basicConfig(
 )
 logging.getLogger("httpx").setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
+

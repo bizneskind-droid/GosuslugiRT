@@ -9,8 +9,8 @@ from random import choice, uniform
 from typing import Any, Literal, cast
 
 import httpx
-
-from config import DoctorParams, GlobalsParams, PolicyParams, get_cookies
+from config import get_cookies
+from models import DoctorParams, GlobalsParams, PolicyParams, DataInit, SelectData
 from logger import logger
 
 headers = {
@@ -33,7 +33,7 @@ async def send_request(
         data: Mapping[str, dict[str, Any] | str] | None = None,
         json: Any | None = None,
     ) -> httpx.Response:
-    
+
     attempts = 5
 
     for _ in range(attempts):
@@ -71,7 +71,7 @@ async def send_request(
 
     raise RuntimeError(f'Не удалось выполнить запрос: {url}')
         
-def create_data_init() -> dict[str, dict[str, Any]]:
+def create_data_init() -> DataInit:
     return {'select_doctor': {
         'user': None,
         'doctor': None
@@ -79,6 +79,10 @@ def create_data_init() -> dict[str, dict[str, Any]]:
 
 def create_globals_params() -> GlobalsParams:
     return {'globalsid': ''}
+
+def create_select_data() -> SelectData:
+    selectedDate: str,
+    selectedId: str
 
 @dataclass
 class GosuslugiRT:
@@ -89,8 +93,9 @@ class GosuslugiRT:
     doctor_params: DoctorParams
     doctors: list[str]
     globals_params: GlobalsParams = field(default_factory=create_globals_params)
-    data_init: dict[str, dict[str, Any]] = field(default_factory=create_data_init)
-
+    data_init: DataInit = field(default_factory=create_data_init)
+    select_data: SelectData = field(default_factory=create_select_data)
+    
     async def get_globals_id(self):
         response = await send_request(
             self.client,
@@ -202,6 +207,7 @@ class GosuslugiRT:
         year = appointment_time['date']['year']
         select_time, select_id = appointment_time['time'], appointment_time['id']
         self.date_time = f'{day}.{month}.{year} {select_time}'
+        
         select_data = {
             'selectedDate': self.date_time,
             'selectedId': select_id
