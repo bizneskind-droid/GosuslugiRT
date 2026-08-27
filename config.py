@@ -157,16 +157,14 @@ def get_doctors(doctor_params: tuple, policy_key: int) -> list[Doctor]:
 
 
 def choose_doctors(state: State):
-    doctors = state['doctors']
-    # [doctor['name'] for doctor in state['doctors'] \
-    #            if not doctor['available_dates']]
+    doctors = [doctor['name'] for doctor in state['doctors'] \
+               if not doctor['available_dates']]
     
     if not doctors:
         raise ValueError("Нет врачей")
         
     doctors_dict = {}
     for i, doctor in enumerate(doctors, start=1):
-        doctor = doctor['name']
         doctors_dict[str(i)] = doctor
         print(f'{i} - {doctor}')
         print('-' * 100)

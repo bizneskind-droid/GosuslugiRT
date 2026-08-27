@@ -1,7 +1,6 @@
 import argparse
 import asyncio
 import json
-import traceback
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -18,6 +17,13 @@ headers = {
     'x-requested-with': 'XMLHttpRequest',
 }
 
+ru_directions = {
+    'terapevt': 'Терапевт, Педиатр',
+    'stomatolog': 'Стоматология',
+    'ginekolog': 'Гинекология',
+    'other_doctor': 'Другие специальности'
+}
+
     
 async def send_request(
         client: httpx.AsyncClient,
@@ -28,10 +34,10 @@ async def send_request(
         json: Any | None = None,
     ) -> httpx.Response:
     
-    attempts = 3
+    attempts = 5
 
-    try:
-        for _ in range(attempts):
+    for _ in range(attempts):
+        try:
             response = await client.request(
                 method=method,
                 url=url,
@@ -42,26 +48,26 @@ async def send_request(
             response.raise_for_status()
             return response
         
-    except httpx.HTTPStatusError as e:
-        logger.warning(
-            "HTTP ошибка %s при запросе %s\n"
-            "Ожидание 3 секунды",
-            e.response.status_code,
-            url,    
-        )
-        await asyncio.sleep(3)
+        except httpx.HTTPStatusError as e:
+            logger.warning(
+                "HTTP ошибка %s при запросе %s\n"
+                "Ожидание 3 секунды",
+                e.response.status_code,
+                url,    
+            )
+            await asyncio.sleep(3)
 
-    except httpx.TimeoutException:
-        logger.warning(
-            "Превышено время ожидания при запросе %s",
-            url,
-        )
+        except httpx.TimeoutException:
+            logger.warning(
+                "Превышено время ожидания при запросе %s",
+                url,
+            )
 
-    except httpx.HTTPError:
-        logger.warning(
-            "Сетевая ошибка при запросе %s",
-            url,
-        )
+        except httpx.HTTPError:
+            logger.warning(
+                "Сетевая ошибка при запросе %s",
+                url,
+            )
 
     raise RuntimeError(f'Не удалось выполнить запрос: {url}')
         
@@ -119,7 +125,7 @@ class GosuslugiRT:
 
     async def check_dates(self):
         
-        attempts = 5
+        attempts = 75
         
         for attempt in range(1, attempts + 1):
             response = await send_request(
@@ -231,7 +237,7 @@ class GosuslugiRT:
             await self.check_dates()
 
         except Exception:
-            logger.error('[%s] Произошла ошибка',
+            logger.exception('[%s] Произошла ошибка',
                          self.whois
             )
             
@@ -245,7 +251,8 @@ async def book_appointment(client: httpx.AsyncClient, appointments: dict[str, di
             doctor_params = direction_data['doctor_params']
             doctors = direction_data['doctors']
 
-            whois = f'{name} - {direction}'
+            ru_direction = ru_directions[direction]
+            whois = f'{name} - {ru_direction}'
             patient = GosuslugiRT(whois, client, policy_params, doctor_params, doctors)
             coroutines.append(asyncio.create_task(patient.runner()))
 
