@@ -109,7 +109,7 @@ def create_globals_params() -> GlobalsParams:
 
 
 @dataclass
-class GosuslugiRT:
+class UslugiRT:
 
     whois: str
     client: httpx.AsyncClient
@@ -304,7 +304,7 @@ async def book_appointment(
 
             ru_direction = ru_directions[direction]
             whois = f'{name} - {ru_direction}'
-            patient = GosuslugiRT(whois, client, policy_params, doctor_params, doctors)
+            patient = UslugiRT(whois, client, policy_params, doctor_params, doctors)
             coroutines.append(asyncio.create_task(patient.runner()))
 
     await asyncio.wait(coroutines)

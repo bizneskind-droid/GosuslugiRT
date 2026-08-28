@@ -65,5 +65,5 @@ class Appointment(TypedDict):
     directions: dict[str, AppointmentDirection]
 
 
-type Appointments = dict[str, dict[str, Appointment]]
 type AppointmentRecords = dict[str, Appointment]
+type Appointments = dict[str, AppointmentRecords]
