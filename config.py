@@ -1,15 +1,14 @@
-# -*- coding: utf-8 -*-
-
 import json
 import sys
 import traceback
 from copy import deepcopy
 from functools import cache
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import cast
 
 import httpx
 
+from models import Doctor, State, Appointments
 from setup import setup
 
 all_directions = {
@@ -21,40 +20,6 @@ all_directions = {
 
 client: httpx.Client
 
-class GlobalsParams(TypedDict):
-    globalsid: str
-
-class PolicyParams(TypedDict):
-    globalsid: str
-    policy_key: str | None
-
-
-class DoctorParams(TypedDict):
-    globalsid: str
-    filter: str | None
-    attachment: int
-
-
-class AvailableDates(TypedDict):
-    full_date: str
-    date: str
-    week: str
-
-
-class Doctor(TypedDict):
-    name: str
-    available_dates: list[AvailableDates]
-
-
-class State(TypedDict):
-    policy_params: PolicyParams
-    doctor_params: DoctorParams
-    directions: dict[str, list[str]]
-    name: str
-    doctors: list[Doctor]
-    selected_doctors: list[str]
-    time: str | None
-    
 def get_cookies() -> dict[str, str]:
     p = Path(".data/")
     
@@ -86,14 +51,14 @@ def init_session(directions: dict[str, list]) -> State:
         },
         "doctor_params": {
             "globalsid": globals_id,
-            "filter": None,
+            "filter": '',
             "attachment": 1,
         },
         "directions": directions,
         "name": "",
         "doctors": [],
         "selected_doctors": [],
-        "time": None,
+        "time": 'null',
     }
     
     return state
@@ -103,12 +68,14 @@ def choose_policy(state: State):
     p = Path('.data/policy.json')
     policy = json.loads(p.read_text(encoding='utf-8'))
 
+    policy_dict = {}
     for key in policy:
         num = int(key) + 1
+        policy_dict[num] = policy[key]
         print(f'{num} - {policy[key]}')
     print()
     
-    user_choice = int(input('Выберите полис: ').strip()) 
+    user_choice = get_user_choice('Выберите полис: ', policy_dict)[0]
     policy_key = str(user_choice - 1)
     state['name'] = policy[policy_key]
     state['policy_params']['policy_key'] = policy_key
@@ -129,12 +96,16 @@ def set_policy(policy_params: tuple):
     
 def choose_direction(state: State):
     directions = state['directions']
+    
+    directions_dict = {}
     for i in directions:
+        directions_dict[int(i)] = directions[i][0]
         print(f'{i} - {directions[i][0]}')
     print()
     
-    user_choice = input('Выберите специальность: ').strip()
-    direction = directions[user_choice][1]
+    user_choice = get_user_choice('Выберите специальность: ', directions_dict)[0]
+    direction = directions[str(user_choice)][1]
+    
     if direction == 'stomatolog':
         state['doctor_params']['attachment'] = 0
     state['doctor_params']['filter'] = direction
@@ -145,7 +116,7 @@ def choose_direction(state: State):
     
 
 @cache
-def get_doctors(doctor_params: tuple, policy_key: int) -> list[Doctor]:
+def get_doctors(doctor_params: tuple, cache_policy_key: str) -> list[Doctor]:
     doctor_params_dict = dict(doctor_params)
         
     response = client.get(
@@ -165,25 +136,36 @@ def choose_doctors(state: State):
         
     doctors_dict = {}
     for i, doctor in enumerate(doctors, start=1):
-        doctors_dict[str(i)] = doctor
+        doctors_dict[i] = doctor
         print(f'{i} - {doctor}')
-        print('-' * 100)
+        print(100 * '-')
+    
 
-    user_choice = input('Выберите одного или нескольких врачей через пробел: ').strip()
+    user_choices = get_user_choice(
+        'Выберите одного или нескольких врачей через пробел: ',
+        doctors_dict,
+        multiple=True,
+    )
     state['selected_doctors'] = []
-    for key in user_choice.split():
+    for key in user_choices:
         doctor_name = doctors_dict[key]
         state['selected_doctors'].append(doctor_name)
         
         
 def choose_time(state: State):
-    user_choice = input("Хотите добавить автозапуск? (Да/Нет): ").lower()
-    if user_choice == 'да':
+    dict_time = {1: 'Автозапуск', 2: 'Без автозапуска'}
+    for key, value in dict_time.items():
+        print(f'{key} - {value}')
+    print()
+        
+    user_choice = get_user_choice(
+        "Выберите вариант: ",
+        dict_time
+    )[0]
+    if user_choice == 1:
         selected_time = input("Введите время (например 7:00): ").strip()
         state['time'] = selected_time
         set_task(selected_time)
-    else:
-        state['time'] = None
     
 def set_task(selected_time):
     platform = sys.platform
@@ -195,9 +177,9 @@ def set_task(selected_time):
         pass
         
         
-def add_appointment(appointments: dict,
+def add_appointment(appointments: Appointments,
                     state: State
-    ) -> dict[str, dict]:
+    ) -> Appointments:
     
     time = state['time']
     name = state['name']
@@ -206,15 +188,19 @@ def add_appointment(appointments: dict,
     direction = state['doctor_params']['filter']
     doctors = state['selected_doctors']
 
-    entry = appointments.setdefault(time, {}).setdefault(name, {})
-    
-    entry['policy_params'] = policy_params
-  
-    entry.setdefault('directions', {}) \
-         .setdefault(direction, {})['doctor_params'] = doctor_params
-    
-    entry['directions'][direction]['doctors'] = doctors
-    
+    entry = appointments.setdefault(time, {}).setdefault(
+        name,
+        {
+            "policy_params": policy_params,
+            "directions": {},
+        },
+    )
+
+    directions = entry["directions"]
+    directions[direction] = {
+        "doctor_params": doctor_params,
+        "doctors": doctors,
+    }
 
     return deepcopy(appointments)
 
@@ -237,7 +223,33 @@ def finish_record(appointments: dict,
         current = start
 
     return appointments, current
+
+def get_user_choice(
+    prompt: str,
+    options: dict[int, str],
+    *,
+    multiple: bool = False,
+) -> list[int]:
+    attempts = 3
     
+    for _ in range(attempts):
+        try:
+            values = input(prompt).split()
+            if not values:
+                raise ValueError("Выберите хотя бы один вариант")
+            if not multiple and len(values) != 1:
+                raise ValueError("Выберите только один вариант")
+
+            choices = [int(value) for value in values]
+            if any(choice not in options for choice in choices):
+                raise ValueError("Выберите один из доступных вариантов")
+            
+            return choices
+        
+        except ValueError as e:
+            print(f'Ошибка: {e}')
+            
+    raise ValueError("Превышены попытки")
     
 def choose_next_act(
         current: int,
@@ -272,7 +284,7 @@ def choose_next_act(
     
 def runner(directions):
     state = init_session(directions)
-    appointments = {}
+    appointments: Appointments = {}
     
     steps = [
         choose_policy,
@@ -304,8 +316,8 @@ def set_config():
         
         runner(all_directions)  
         
-    except ValueError:
-        print("Ошибка: Такого варианта нет") 
+    except ValueError as e:
+        print(f"Ошибка: {e}")
     
     except httpx.HTTPError as e:
         print(f'Сетевая ошибка: {e}')

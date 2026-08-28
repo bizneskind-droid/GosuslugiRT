@@ -1,7 +1,6 @@
 import argparse
 import asyncio
 import json
-from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -9,9 +8,18 @@ from random import choice, uniform
 from typing import Any, Literal, cast
 
 import httpx
+
 from config import get_cookies
-from models import DoctorParams, GlobalsParams, PolicyParams, DataInit, SelectData
 from logger import logger
+from models import (
+    AppointmentRecords,
+    DataInit,
+    DataSelect,
+    DoctorParams,
+    GlobalsParams,
+    InitFormData,
+    PolicyParams,
+)
 
 headers = {
     'x-requested-with': 'XMLHttpRequest',
@@ -24,14 +32,29 @@ ru_directions = {
     'other_doctor': 'Другие специальности'
 }
 
+
+def get_payload(response: httpx.Response) -> bool:
+    try:
+        payload = response.json()
+    except ValueError:
+        logger.error("Сервер вернул некорректный JSON")
+        return False
+
+    if not isinstance(payload, dict):
+        logger.error("Ответ сервера должен быть JSON-объектом")
+        return False
+
+    return True
+
     
 async def send_request(
         client: httpx.AsyncClient,
         method: Literal["GET", "POST"],
         url: str,
         params: PolicyParams | DoctorParams | GlobalsParams| None = None,
-        data: Mapping[str, dict[str, Any] | str] | None = None,
+        data: InitFormData | DataSelect | None = None,
         json: Any | None = None,
+        validate_json: bool = False,
     ) -> httpx.Response:
 
     attempts = 5
@@ -46,6 +69,10 @@ async def send_request(
                 json=json,
             )
             response.raise_for_status()
+            if validate_json and not get_payload(response):
+                await asyncio.sleep(3)
+                continue
+
             return response
         
         except httpx.HTTPStatusError as e:
@@ -80,9 +107,6 @@ def create_data_init() -> DataInit:
 def create_globals_params() -> GlobalsParams:
     return {'globalsid': ''}
 
-def create_select_data() -> SelectData:
-    selectedDate: str,
-    selectedId: str
 
 @dataclass
 class GosuslugiRT:
@@ -92,9 +116,8 @@ class GosuslugiRT:
     policy_params: PolicyParams
     doctor_params: DoctorParams
     doctors: list[str]
+    data_init: DataInit | None = None
     globals_params: GlobalsParams = field(default_factory=create_globals_params)
-    data_init: DataInit = field(default_factory=create_data_init)
-    select_data: SelectData = field(default_factory=create_select_data)
     
     async def get_globals_id(self):
         response = await send_request(
@@ -118,14 +141,20 @@ class GosuslugiRT:
             self.client,
             'GET',
             '/check-policy-ajax',
-            self.policy_params
+            self.policy_params,
+            validate_json=True,
         )
         
         logger.info('[%s] Полис проверен',
                     self.whois,
                     )
 
-        self.data_init['select_doctor']['user'] = response.json()['user']
+        self.data_init = {
+            "select_doctor": {
+                "user": response.json()["user"],
+                "doctor": None,
+            }
+        }      
 
 
     async def check_dates(self):
@@ -137,7 +166,8 @@ class GosuslugiRT:
                 self.client,
                 'GET',
                 '/ajax-source',
-                self.doctor_params
+                self.doctor_params,
+                validate_json=True,
             )
 
             doctors = response.json()['resources']
@@ -145,15 +175,19 @@ class GosuslugiRT:
             for selected_doctor in self.doctors:
                 for doctor in doctors:
                     if doctor['name'] == selected_doctor and doctor['available_dates']:
-                        data_init_selected_doctor: dict[str, Any] = deepcopy(
-                            self.data_init
-                        )
-                        data_init_selected_doctor['select_doctor']['doctor'] = doctor
-                        data_init_selected_doctor['select_doctor'] = json.dumps(
-                            data_init_selected_doctor['select_doctor']
-                        )
+                        
+                        if self.data_init is None:
+                            raise RuntimeError("Данные инициализации не получены")
+                        
+                        data_init: DataInit = deepcopy(self.data_init)
+                        data_init["select_doctor"]["doctor"] = doctor
+                        
+                        data_init_form: InitFormData = {
+                            "select_doctor": json.dumps(data_init["select_doctor"])
+                        }
+                        
 
-                        await self.init_data(data_init_selected_doctor, selected_doctor)
+                        await self.init_data(data_init_form, selected_doctor)
                         break
                 else:      
                     logger.info('[%s] попытка %s/%s: Не найдено доступных дат для %s',
@@ -169,7 +203,7 @@ class GosuslugiRT:
 
             await asyncio.sleep(uniform(1, 1.5))
 
-    async def init_data(self, data_init: dict[str, Any], doctor: str):
+    async def init_data(self, data_init: InitFormData, doctor: str):
 
         await send_request(
             self.client,
@@ -191,7 +225,8 @@ class GosuslugiRT:
             self.client,
             'GET',
             '/ajax-calendar-data',
-            self.globals_params
+            self.globals_params,
+            validate_json=True,
         )
 
         logger.info('[%s] Выбираем случайный слот для %s',
@@ -206,24 +241,24 @@ class GosuslugiRT:
         month = appointment_time['date']['month']
         year = appointment_time['date']['year']
         select_time, select_id = appointment_time['time'], appointment_time['id']
-        self.date_time = f'{day}.{month}.{year} {select_time}'
         
-        select_data = {
-            'selectedDate': self.date_time,
-            'selectedId': select_id
+        data_select: DataSelect = {
+            "selectedDate": f'{day}.{month}.{year} {select_time}',
+            "selectedId": select_id,
         }
 
-        await self.confirm_record(select_data, doctor)
+        await self.confirm_record(data_select, doctor)
 
 
-    async def confirm_record(self, select_data: dict[str, str], doctor: str):
+    async def confirm_record(self, data_select: DataSelect, doctor: str):
 
         response = await send_request(
             self.client,
             'POST',
             '/init-record',
             self.globals_params,
-            select_data
+            data_select,
+            validate_json=True,
         )
 
         if response.json()['status'] == 'success':
@@ -232,7 +267,7 @@ class GosuslugiRT:
                         'Дата и время: %s',
                         self.whois,
                         doctor,
-                        self.date_time
+                        data_select['selectedDate']
             )
 
 
@@ -242,14 +277,24 @@ class GosuslugiRT:
             await self.confirmation_police()
             await self.check_dates()
 
-        except Exception:
+        except (
+            httpx.HTTPError,
+            RuntimeError,
+            KeyError,
+            TypeError,
+            IndexError,
+            ValueError,
+        ):
             logger.exception('[%s] Произошла ошибка',
                          self.whois
             )
             
-async def book_appointment(client: httpx.AsyncClient, appointments: dict[str, dict]):
+async def book_appointment(
+    client: httpx.AsyncClient,
+    appointments: AppointmentRecords,
+) -> None:
 
-    coroutines  = list()
+    coroutines: list[asyncio.Task[None]] = []
     for name, name_data in appointments.items():
         policy_params = name_data['policy_params']
 
@@ -265,7 +310,7 @@ async def book_appointment(client: httpx.AsyncClient, appointments: dict[str, di
     await asyncio.wait(coroutines)
 
 
-async def main(selected_time):
+async def main(selected_time: str):
 
     async with httpx.AsyncClient(
         follow_redirects=True,
@@ -277,7 +322,7 @@ async def main(selected_time):
         p = Path('.data/appointments.json')
         all_appointments = json.loads(p.read_text(encoding='utf-8'))
         
-        appointments = {}
+        appointments: AppointmentRecords = {}
         for appointment_time in all_appointments:
             if appointment_time == selected_time:
                 appointments.update(all_appointments[selected_time])
@@ -293,5 +338,3 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     asyncio.run(main(args.time))
-
-

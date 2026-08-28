@@ -1,4 +1,5 @@
-from typing import TypedDict, Any
+from typing import Any, TypedDict
+
 
 class GlobalsParams(TypedDict):
     globalsid: str
@@ -11,7 +12,7 @@ class PolicyParams(TypedDict):
 
 class DoctorParams(TypedDict):
     globalsid: str
-    filter: str | None
+    filter: str
     attachment: int
 
 
@@ -35,7 +36,11 @@ class DataInit(TypedDict):
     select_doctor: SelectDoctorData
 
 
-class SelectData(TypedDict):
+class InitFormData(TypedDict):
+    select_doctor: str
+
+
+class DataSelect(TypedDict):
     selectedDate: str
     selectedId: str
 
@@ -47,7 +52,18 @@ class State(TypedDict):
     name: str
     doctors: list[Doctor]
     selected_doctors: list[str]
-    time: str | None
+    time: str 
 
 
+class AppointmentDirection(TypedDict):
+    doctor_params: DoctorParams
+    doctors: list[str]
 
+
+class Appointment(TypedDict):
+    policy_params: PolicyParams
+    directions: dict[str, AppointmentDirection]
+
+
+type Appointments = dict[str, dict[str, Appointment]]
+type AppointmentRecords = dict[str, Appointment]
